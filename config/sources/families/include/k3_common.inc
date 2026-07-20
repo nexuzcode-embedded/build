@@ -61,6 +61,50 @@ function compile_k3_bootgen() {
 	if [[ "${BOOT_SOC}" != "am62l" ]]; then
 		pushd ${SRC}/cache/sources/u-boot-worktree/${BOOTDIR}/${BOOTBRANCH##*:} || exit
 		run_host_command_logged make -j$(nproc) CROSS_COMPILE=arm-linux-gnueabi- ARCH=arm O=build-r5 ${TIBOOT3_BOOTCONFIG}
+
+		# Several K3 R5 first-stage SPLs (tiboot3) overrun their SPL size limit on
+		# the TI vendor trees under our toolchain. Fix per-config, chosen by the
+		# SRAM layout, via scripts/config (not defconfig patches) so it tracks the
+		# vendor configs. Only tiboot3 (R5 first stage) is affected; the A53 SPL
+		# and u-boot proper are untouched. Both need a card boot smoke test before
+		# merge. See CONFIG_CUSTOM_SYS_INIT_SP_ADDR vs SPL_SIZE_LIMIT for headroom.
+		declare r5_config_changed="no"
+		case "${TIBOOT3_BOOTCONFIG}" in
+			am62px_evm_r5_defconfig)
+				# AM62Px: SPL_SIZE_LIMIT 0x3C000, but the stack pointer (SRAM top)
+				# is at 0x43c4a7f0 -> ~58 KB of unused SRAM above the limit. The
+				# overrun is only a few KB (excess 0x1bee), so raise the caps into
+				# that headroom and keep the (unused-by-us but functional) SPI +
+				# SPI-NAND boot paths. New top 0x43c40000 stays below the stack.
+				display_alert "$BOARD" "Raising am62p R5 SPL size limit into available SRAM headroom" "info"
+				run_host_command_logged scripts/config --file build-r5/.config \
+					--set-val CONFIG_SPL_SIZE_LIMIT 0x40000 \
+					--set-val CONFIG_SPL_MAX_SIZE 0x3F000
+				r5_config_changed="yes"
+				;;
+			am62x_lpsk_r5_defconfig)
+				# AM625: SPL_SIZE_LIMIT 0x3A7F0 == stack pointer - base (0x43c3a7f0),
+				# i.e. the limit already sits at the SRAM ceiling - no room to raise.
+				# am62x_lpsk = am62x_evm (which fits) + a SPI-NAND boot stack, and
+				# that stack is dead weight here (we boot tiboot3 from SD/eMMC). Drop
+				# it so the R5 SPL matches the EVM size; olddefconfig cascades the
+				# MTD_SPI_NAND vendor drivers. Booting this u-boot from SPI-NAND is
+				# no longer possible, which Armbian does not do for this board.
+				display_alert "$BOARD" "Dropping unused SPI-NAND boot stack from am62-lp R5 SPL to fit SRAM" "info"
+				run_host_command_logged scripts/config --file build-r5/.config \
+					--disable CONFIG_SPL_MTD \
+					--disable CONFIG_SPL_MTD_LOAD \
+					--disable CONFIG_SPL_MTD_NAND_LOAD \
+					--disable CONFIG_SPL_NAND_SPI_SUPPORT \
+					--disable CONFIG_MTD_SPI_NAND \
+					--disable CONFIG_DM_MTD
+				r5_config_changed="yes"
+				;;
+		esac
+		if [[ "${r5_config_changed}" == "yes" ]]; then
+			run_host_command_logged make -j$(nproc) CROSS_COMPILE=arm-linux-gnueabi- ARCH=arm O=build-r5 olddefconfig
+		fi
+
 		run_host_command_logged make -j$(nproc) CROSS_COMPILE=arm-linux-gnueabi- ARCH=arm O=build-r5 BINMAN_INDIRS=${SRC}/cache/sources/ti-linux-firmware
 		popd
 	fi
