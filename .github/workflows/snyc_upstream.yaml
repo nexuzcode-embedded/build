@@ -1,0 +1,48 @@
+name: Sync Fork with Upstream
+
+on:
+  schedule:
+    # Täglich um 03:00 UTC
+    - cron: "0 3 * * *"
+
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.NEXUZCODE_EMBEDDED_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Add Upstream Remote
+        run: |
+          git remote remove upstream || true
+          git remote add upstream https://github.com/armbian/build.git
+
+      - name: Fetch Upstream
+        run: |
+          git fetch upstream
+
+      - name: Checkout Main
+        run: |
+          git checkout main
+
+      - name: Sync Main
+        run: |
+          git merge --ff-only upstream/main
+
+      - name: Push Changes
+        run: |
+          git push origin main
