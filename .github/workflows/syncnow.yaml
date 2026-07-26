@@ -1,0 +1,40 @@
+name: Sync Upstream
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.NEXUZCODE_EMBEDDED_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Configure Upstream
+        run: |
+          git remote remove upstream || true
+          git remote add upstream https://github.com/armbian/build.git
+          git fetch upstream
+
+      - name: Mirror Upstream
+        run: |
+          git checkout main
+          git reset --hard upstream/main
+
+      - name: Push
+        run: |
+          git push --force origin main
